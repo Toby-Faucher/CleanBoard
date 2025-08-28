@@ -34,7 +34,7 @@ class HealthChecker:
 
                 results[check.name] = CheckResult(
                     status=status,
-                    response_time_ms=round(response_time, 2),
+                    response_time=round(response_time, 2),
                     critical=check.critical
                 )
 
@@ -44,6 +44,7 @@ class HealthChecker:
             except Exception as e:
                 results[check.name] = CheckResult(
                     status=HealthStatus.ERROR,
+                    response_time=0.0,
                     error=str(e),
                     critical=check.critical
                 )
