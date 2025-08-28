@@ -63,24 +63,6 @@ class CheckResult(BaseModel):
             raise ValueError('details dictionary cannot be empty')
         return v
 
-    @field_validator('response_time')
-    @classmethod
-    def validate_response_time(cls, v: Optional[float]) -> Optional[float]:
-        """Validate that response_time is non-negative.
-        
-        Args:
-            v: The response time value to validate
-            
-        Returns:
-            Optional[float]: The validated response time
-            
-        Raises:
-            ValueError: If response_time is negative
-        """
-        if v is not None and v < 0:
-            raise ValueError('response_time must be non-negative')
-        return v
-
     @field_validator('error')
     @classmethod
     def validate_error(cls, v: Optional[str]) -> Optional[str]:
