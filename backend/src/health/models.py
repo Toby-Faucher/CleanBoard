@@ -81,6 +81,25 @@ class CheckResult(BaseModel):
             raise ValueError('error message cannot be empty or whitespace only')
         return v
 
+def _validate_checks_dict(v: Dict[str, CheckResult]) -> Dict[str, CheckResult]:
+    """Validate that checks dictionary is not empty and has valid names.
+    
+    Args:
+        v: Dictionary of health check results to validate
+        
+    Returns:
+        Dict[str, CheckResult]: The validated checks dictionary
+        
+    Raises:
+        ValueError: If no checks provided or check names are invalid
+    """
+    if not v:
+        raise ValueError('at least one health check must be provided')
+    for check_name, check_result in v.items():
+        if not check_name.strip():
+            raise ValueError('check names cannot be empty or whitespace only')
+    return v
+
 class OverallHealth(str, Enum):
     """Enumeration for overall system health status.
     
@@ -118,23 +137,8 @@ class HealthCheckResponse(BaseHealthModel):
     @field_validator('checks')
     @classmethod
     def validate_checks(cls, v: Dict[str, CheckResult]) -> Dict[str, CheckResult]:
-        """Validate that checks dictionary is not empty and has valid names.
-        
-        Args:
-            v: Dictionary of health check results to validate
-            
-        Returns:
-            Dict[str, CheckResult]: The validated checks dictionary
-            
-        Raises:
-            ValueError: If no checks provided or check names are invalid
-        """
-        if not v:
-            raise ValueError('at least one health check must be provided')
-        for check_name, check_result in v.items():
-            if not check_name.strip():
-                raise ValueError('check names cannot be empty or whitespace only')
-        return v
+        """Validate that checks dictionary is not empty and has valid names."""
+        return _validate_checks_dict(v)
 
 class ReadinessResponse(BaseHealthModel):
     """Response model for readiness check endpoints.
@@ -153,20 +157,5 @@ class ReadinessResponse(BaseHealthModel):
     @field_validator('checks')
     @classmethod
     def validate_checks(cls, v: Dict[str, CheckResult]) -> Dict[str, CheckResult]:
-        """Validate that checks dictionary is not empty and has valid names.
-        
-        Args:
-            v: Dictionary of readiness check results to validate
-            
-        Returns:
-            Dict[str, CheckResult]: The validated checks dictionary
-            
-        Raises:
-            ValueError: If no checks provided or check names are invalid
-        """
-        if not v:
-            raise ValueError('at least one readiness check must be provided')
-        for check_name, check_result in v.items():
-            if not check_name.strip():
-                raise ValueError('check names cannot be empty or whitespace only')
-        return v
+        """Validate that checks dictionary is not empty and has valid names."""
+        return _validate_checks_dict(v)
