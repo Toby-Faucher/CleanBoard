@@ -20,10 +20,7 @@ class HealthChecker:
         self.checks.append(HealthCheck(name, check_func, critical))
 
     async def _execute_checks(self, checks_to_run: List[HealthCheck]) -> HealthCheckResponse:
-        results = {}
-        critical_failed = False
-
-        for check in checks_to_run:
+        async def execute_single_check(check: HealthCheck) -> tuple[str, CheckResult]:
             try:
                 start_time = datetime.now()
                 is_healthy = await check.check_func()
@@ -32,26 +29,31 @@ class HealthChecker:
 
                 status = HealthStatus.HEALTHY if is_healthy else HealthStatus.UNHEALTHY 
 
-                results[check.name] = CheckResult(
+                return check.name, CheckResult(
                     status=status,
                     response_time=round(response_time, 2),
                     critical=check.critical
                 )
 
-                if not is_healthy and check.critical:
-                    critical_failed = True
-
             except Exception as e:
-                results[check.name] = CheckResult(
+                return check.name, CheckResult(
                     status=HealthStatus.ERROR,
                     response_time=0.0,
                     error=str(e),
                     critical=check.critical
                 )
 
-                if check.critical:
-                    critical_failed = True
-                
+        check_results = await asyncio.gather(
+            *[execute_single_check(check) for check in checks_to_run],
+            return_exceptions=False
+        )
+
+        results = dict(check_results)
+        critical_failed = any(
+            not result.status == HealthStatus.HEALTHY and result.critical 
+            for result in results.values()
+        )
+        
         system_status = SystemHealth.UNHEALTHY if critical_failed else SystemHealth.HEALTHY
 
         return HealthCheckResponse(
