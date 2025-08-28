@@ -33,7 +33,7 @@ class HealthChecker:
         if len(sig.parameters) > 0:
             raise ValueError(f"Check function '{name}' must not accept any parameters")
 
-    async def _execute_checks(self, checks_to_run: List[HealthCheck]) -> HealthCheckResponse:
+    async def _execute_checks(self, checks_to_run: List[HealthCheck], fail_fast: bool = False) -> HealthCheckResponse:
         async def execute_single_check(check: HealthCheck) -> tuple[str, CheckResult]:
             try:
                 start_time = datetime.now()
@@ -81,16 +81,68 @@ class HealthChecker:
                     critical=check.critical
                 )
 
-        check_results = await asyncio.gather(
-            *[execute_single_check(check) for check in checks_to_run],
-            return_exceptions=False
-        )
-
-        results = dict(check_results)
-        critical_failed = any(
-            not result.status == HealthStatus.HEALTHY and result.critical 
-            for result in results.values()
-        )
+        if fail_fast:
+            # Early termination mode - stop on first critical failure
+            tasks = {asyncio.create_task(execute_single_check(check)): check for check in checks_to_run}
+            results = {}
+            critical_failed = False
+            
+            try:
+                for completed_task in asyncio.as_completed(tasks.keys()):
+                    check_name, result = await completed_task
+                    results[check_name] = result
+                    
+                    # Check if this is a critical failure
+                    if result.critical and result.status != HealthStatus.HEALTHY:
+                        critical_failed = True
+                        # Cancel remaining tasks
+                        for task in tasks.keys():
+                            if not task.done():
+                                task.cancel()
+                        break
+                
+                # Wait for cancelled tasks to complete and mark them as cancelled
+                if critical_failed:
+                    for task, check in tasks.items():
+                        if task.cancelled():
+                            results[check.name] = CheckResult(
+                                status=HealthStatus.CANCELLED,
+                                response_time=0.0,
+                                critical=check.critical,
+                                error="Check cancelled due to critical failure in fail-fast mode"
+                            )
+                        elif not task.done():
+                            try:
+                                await task
+                            except asyncio.CancelledError:
+                                results[check.name] = CheckResult(
+                                    status=HealthStatus.CANCELLED,
+                                    response_time=0.0,
+                                    critical=check.critical,
+                                    error="Check cancelled due to critical failure in fail-fast mode"
+                                )
+            except asyncio.CancelledError:
+                # Handle case where the entire operation is cancelled
+                for check in checks_to_run:
+                    if check.name not in results:
+                        results[check.name] = CheckResult(
+                            status=HealthStatus.CANCELLED,
+                            response_time=0.0,
+                            critical=check.critical,
+                            error="Check cancelled"
+                        )
+                critical_failed = True
+        else:
+            # Original behavior - run all checks to completion
+            check_results = await asyncio.gather(
+                *[execute_single_check(check) for check in checks_to_run],
+                return_exceptions=False
+            )
+            results = dict(check_results)
+            critical_failed = any(
+                not result.status == HealthStatus.HEALTHY and result.critical 
+                for result in results.values()
+            )
         
         system_status = SystemHealth.UNHEALTHY if critical_failed else SystemHealth.HEALTHY
 
@@ -105,3 +157,10 @@ class HealthChecker:
     async def run_critical_checks(self) -> HealthCheckResponse:
         critical_checks = [check for check in self.checks if check.critical]
         return await self._execute_checks(critical_checks)
+
+    async def run_checks_with_fail_fast(self) -> HealthCheckResponse:
+        return await self._execute_checks(self.checks, fail_fast=True)
+
+    async def run_critical_checks_with_fail_fast(self) -> HealthCheckResponse:
+        critical_checks = [check for check in self.checks if check.critical]
+        return await self._execute_checks(critical_checks, fail_fast=True)

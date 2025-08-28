@@ -24,11 +24,14 @@ class HealthStatus(str, Enum):
         HEALTHY: Service is functioning normally
         UNHEALTHY: Service is not functioning properly but not in error state
         ERROR: Service encountered an error during health check
+        TIMEDOUT: Service timed out during health check
+        CANCELLED: Service check was cancelled due to early termination
     """
     HEALTHY = "healthy"
     UNHEALTHY = "unhealthy"
     ERROR = "error"
     TIMEDOUT = "timedout"
+    CANCELLED = "cancelled"
 
 class CheckResult(BaseModel):
     """Model representing the result of an individual health check.
