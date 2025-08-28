@@ -28,6 +28,7 @@ class HealthStatus(str, Enum):
     HEALTHY = "healthy"
     UNHEALTHY = "unhealthy"
     ERROR = "error"
+    TIMEDOUT = "timedout"
 
 class CheckResult(BaseModel):
     """Model representing the result of an individual health check.

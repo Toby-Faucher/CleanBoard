@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Callable, Awaitable, List
+from typing import Callable, Awaitable, List, Optional
 import asyncio
 from datetime import datetime
 
@@ -10,20 +10,33 @@ class HealthCheck:
     name: str
     check_func: Callable[[], Awaitable[bool]] 
     critical: bool = True
+    timeout: Optional[float]
 
 class HealthChecker:
     def __init__(self):
         self.checks: List[HealthCheck] = []
 
 
-    def add_check(self, name: str, check_func: Callable, critical: bool = True):
-        self.checks.append(HealthCheck(name, check_func, critical))
+    def add_check(self, name: str, check_func: Callable, critical: bool = True, timeout: Optional[float] = 30.0):
+        self.checks.append(HealthCheck(name, check_func, critical,timeout))
 
     async def _execute_checks(self, checks_to_run: List[HealthCheck]) -> HealthCheckResponse:
         async def execute_single_check(check: HealthCheck) -> tuple[str, CheckResult]:
             try:
                 start_time = datetime.now()
-                is_healthy = await check.check_func()
+                try:
+                    is_healthy = await asyncio.wait_for(
+                            check.check_func(),
+                            check.timeout
+                    )
+                except asyncio.TimeoutError:
+                    return check.name, CheckResult(
+                            status=HealthStatus.TIMEDOUT,
+                            error="Timed Out!",
+                            critical=check.critical,
+                            response_time=check.timeout
+                    )
+
                 end_time = datetime.now()
                 response_time = (end_time - start_time).total_seconds() * 1000
 
