@@ -166,3 +166,15 @@ class ReadinessResponse(BaseHealthModel):
     def validate_checks(cls, v: Dict[str, CheckResult]) -> Dict[str, CheckResult]:
         """Validate that checks dictionary is not empty and has valid names."""
         return _validate_checks_dict(v)
+
+class LivenessResponse(BaseHealthModel):
+    """Response model for liveness check endpoints.
+    
+    Used to determine if the service is alive and running.
+    
+    Attributes:
+        status: Liveness status - always "alive"
+        timestamp: UTC timestamp when the liveness check was performed
+    """
+    status: Literal["alive"] = "alive"
+    timestamp: datetime = Field(default_factory=_utc_now)

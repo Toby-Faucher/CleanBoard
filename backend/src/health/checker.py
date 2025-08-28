@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from typing import Callable, Awaitable, List, Optional, Dict
 import asyncio
 import inspect
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, UTC
 
 from .models import HealthCheckResponse, HealthStatus, CheckResult, SystemHealth
 
@@ -15,8 +15,8 @@ class CacheEntry:
 class HealthCheck:
     name: str
     check_func: Callable[[], Awaitable[bool]] 
-    critical: bool = True
     timeout: Optional[float]
+    critical: bool = True
     cache_ttl: Optional[float] = None
 
 class HealthChecker:
@@ -25,9 +25,9 @@ class HealthChecker:
         self._cache: Dict[str, CacheEntry] = {}
 
 
-    def add_check(self, name: str, check_func: Callable, critical: bool = True, timeout: Optional[float] = 30.0, cache_ttl: Optional[float] = None):
+    def add_check(self, name: str, check_func: Callable, timeout: Optional[float] = 30.0, critical: bool = True, cache_ttl: Optional[float] = None):
         self._validate_check_function(check_func, name)
-        self.checks.append(HealthCheck(name, check_func, critical, timeout, cache_ttl))
+        self.checks.append(HealthCheck(name, check_func, timeout, critical, cache_ttl))
 
     def _validate_check_function(self, check_func: Callable, name: str):
         if not callable(check_func):
@@ -43,18 +43,18 @@ class HealthChecker:
     def _get_cached_result(self, check_name: str) -> Optional[CheckResult]:
         if check_name in self._cache:
             cache_entry = self._cache[check_name]
-            if datetime.now() < cache_entry.expires_at:
+            if datetime.now(UTC) < cache_entry.expires_at:
                 return cache_entry.result
             else:
                 del self._cache[check_name]
         return None
 
     def _cache_result(self, check_name: str, result: CheckResult, ttl_seconds: float):
-        expires_at = datetime.now() + timedelta(seconds=ttl_seconds)
+        expires_at = datetime.now(UTC) + timedelta(seconds=ttl_seconds)
         self._cache[check_name] = CacheEntry(result=result, expires_at=expires_at)
 
     def _cleanup_expired_cache(self):
-        now = datetime.now()
+        now = datetime.now(UTC)
         expired_keys = [key for key, entry in self._cache.items() if now >= entry.expires_at]
         for key in expired_keys:
             del self._cache[key]
@@ -69,7 +69,7 @@ class HealthChecker:
                     return check.name, cached_result
             
             try:
-                start_time = datetime.now()
+                start_time = datetime.now(UTC)
                 try:
                     result = await asyncio.wait_for(
                             check.check_func(),
@@ -95,7 +95,7 @@ class HealthChecker:
                         critical=check.critical
                     )
 
-                end_time = datetime.now()
+                end_time = datetime.now(UTC)
                 response_time = (end_time - start_time).total_seconds() * 1000
 
                 status = HealthStatus.HEALTHY if is_healthy else HealthStatus.UNHEALTHY 
@@ -206,7 +206,7 @@ class HealthChecker:
             self._cache.clear()
 
     def get_cache_stats(self) -> Dict[str, int]:
-        now = datetime.now()
+        now = datetime.now(UTC)
         total_entries = len(self._cache)
         expired_entries = sum(1 for entry in self._cache.values() if now >= entry.expires_at)
         active_entries = total_entries - expired_entries
