@@ -3,10 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from config import settings
 from health import router as health_router
 
-app = FastAPI(
-    title=settings.app_name,
-    debug=settings.debug
-)
+app = FastAPI(title=settings.app_name, debug=settings.debug)
 
 app.add_middleware(
     CORSMiddleware,
@@ -16,8 +13,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(health_router, tags =["Health Checks"])
+app.include_router(health_router, tags=["Health Checks"])
+
 
 @app.get("/")
 async def root():
-    return {"message": "Hello World!"} 
+    return {"message": "Hello World!"}

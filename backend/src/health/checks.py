@@ -1,5 +1,6 @@
 import httpx
 
+
 async def external_api_check() -> bool:
     """Check external service connectivity"""
     try:
@@ -9,10 +10,12 @@ async def external_api_check() -> bool:
     except Exception:
         return False
 
+
 async def memory_check() -> bool:
     """Check memory usage"""
     try:
         import psutil
+
         memory = psutil.virtual_memory()
         # Fail if memory usage is above 90%
         return memory.percent < 90
