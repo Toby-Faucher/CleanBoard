@@ -21,7 +21,7 @@ class HealthChecker:
 
     async def run_checks(self) -> HealthCheckResponse:
         results = {}
-        critial_failed = False
+        critical_failed = False
 
         for check in self.checks:
             try:
@@ -39,7 +39,7 @@ class HealthChecker:
                 )
 
                 if not is_healthy and check.critical:
-                    critial_failed = True
+                    critical_failed = True
 
             except Exception as e:
                 results[check.name] = CheckResult(
@@ -49,9 +49,9 @@ class HealthChecker:
                 )
 
                 if check.critical:
-                    critial_failed = True
+                    critical_failed = True
                 
-        system_status = SystemHealth.UNHEALTHY if critial_failed else SystemHealth.HEALTHY
+        system_status = SystemHealth.UNHEALTHY if critical_failed else SystemHealth.HEALTHY
 
         return HealthCheckResponse(
                 status=system_status,
@@ -60,7 +60,7 @@ class HealthChecker:
 
     async def run_critical_checks(self) -> HealthCheckResponse:
         results = {}
-        critial_failed = False
+        critical_failed = False
 
         critical_checks = [check for check in self.checks if check.critical]
 
@@ -80,7 +80,7 @@ class HealthChecker:
                 )
 
                 if not is_healthy:
-                    critial_failed = True
+                    critical_failed = True
 
             except Exception as e:
                 results[check.name] = CheckResult(
@@ -88,10 +88,10 @@ class HealthChecker:
                     error=str(e),
                     critical=check.critical
                 )
-                critial_failed = True
+                critical_failed = True
 
                 
-        system_status = SystemHealth.UNHEALTHY if critial_failed else SystemHealth.HEALTHY
+        system_status = SystemHealth.UNHEALTHY if critical_failed else SystemHealth.HEALTHY
 
         return HealthCheckResponse(
                 status=system_status,
