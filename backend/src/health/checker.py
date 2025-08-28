@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from typing import Callable, Awaitable, List, Optional
 import asyncio
+import inspect
 from datetime import datetime
 
 from .models import HealthCheckResponse, HealthStatus, CheckResult, SystemHealth
@@ -18,23 +19,47 @@ class HealthChecker:
 
 
     def add_check(self, name: str, check_func: Callable, critical: bool = True, timeout: Optional[float] = 30.0):
-        self.checks.append(HealthCheck(name, check_func, critical,timeout))
+        self._validate_check_function(check_func, name)
+        self.checks.append(HealthCheck(name, check_func, critical, timeout))
+
+    def _validate_check_function(self, check_func: Callable, name: str):
+        if not callable(check_func):
+            raise ValueError(f"Check function '{name}' must be callable")
+        
+        if not inspect.iscoroutinefunction(check_func):
+            raise ValueError(f"Check function '{name}' must be an async function")
+        
+        sig = inspect.signature(check_func)
+        if len(sig.parameters) > 0:
+            raise ValueError(f"Check function '{name}' must not accept any parameters")
 
     async def _execute_checks(self, checks_to_run: List[HealthCheck]) -> HealthCheckResponse:
         async def execute_single_check(check: HealthCheck) -> tuple[str, CheckResult]:
             try:
                 start_time = datetime.now()
                 try:
-                    is_healthy = await asyncio.wait_for(
+                    result = await asyncio.wait_for(
                             check.check_func(),
                             check.timeout
                     )
+                    
+                    if not isinstance(result, bool):
+                        raise ValueError(f"Check function must return a boolean, got {type(result).__name__}")
+                    
+                    is_healthy = result
                 except asyncio.TimeoutError:
                     return check.name, CheckResult(
                             status=HealthStatus.TIMEDOUT,
                             error="Timed Out!",
                             critical=check.critical,
                             response_time=check.timeout
+                    )
+                except TypeError as e:
+                    return check.name, CheckResult(
+                        status=HealthStatus.ERROR,
+                        response_time=0.0,
+                        error=f"Function call error: {str(e)}",
+                        critical=check.critical
                     )
 
                 end_time = datetime.now()
