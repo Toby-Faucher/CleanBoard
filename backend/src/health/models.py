@@ -45,6 +45,24 @@ class CheckResult(BaseModel):
     error: Annotated[Optional[str], Field(min_length=1)] = None
     details: Optional[Dict[str, Any]] = None
 
+    @field_validator('details')
+    @classmethod
+    def validate_details(cls, v: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+        """Validate that details dictionary is not empty when provided.
+        
+        Args:
+            v: The details dictionary to validate
+            
+        Returns:
+            Optional[Dict[str, Any]]: The validated details dictionary
+            
+        Raises:
+            ValueError: If details dictionary is empty
+        """
+        if v is not None and not v:
+            raise ValueError('details dictionary cannot be empty')
+        return v
+
     @field_validator('response_time')
     @classmethod
     def validate_response_time(cls, v: Optional[float]) -> Optional[float]:
@@ -100,8 +118,11 @@ def _validate_checks_dict(v: Dict[str, CheckResult]) -> Dict[str, CheckResult]:
             raise ValueError('check names cannot be empty or whitespace only')
     return v
 
-class OverallHealth(str, Enum):
+class SystemHealth(str, Enum):
     """Enumeration for overall system health status.
+    
+    Unlike individual check statuses, system health is binary - either all critical
+    checks are passing (healthy) or one or more are failing (unhealthy).
     
     Attributes:
         HEALTHY: All critical checks are passing
@@ -130,7 +151,7 @@ class HealthCheckResponse(BaseHealthModel):
         timestamp: UTC timestamp when the health check was performed
         checks: Dictionary of individual health check results
     """
-    status: OverallHealth
+    status: SystemHealth
     timestamp: datetime = Field(default_factory=_utc_now)
     checks: Annotated[Dict[str, CheckResult], Field(min_length=1)]
 
