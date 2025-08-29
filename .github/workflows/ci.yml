@@ -7,31 +7,44 @@ on:
     branches: [ main ]
 
 jobs:
-  # frontend:
-  #   runs-on: ubuntu-latest
-  #   defaults:
-  #     run:
-  #       working-directory: ./frontend/clean-board
-  #   
-  #   steps:
-  #   - uses: actions/checkout@v4
-  #   
-  #   - name: Setup Bun
-  #     uses: oven-sh/setup-bun@v2
-  #     with:
-  #       bun-version: latest
-  #   
-  #   - name: Install dependencies
-  #     run: bun install
-  #   
-  #   - name: Run linter
-  #     run: bun run lint
-  #   
-  #   - name: Run formatter check
-  #     run: bun run format --dry-run
-  #   
-  #   - name: Build
-  #     run: bun run build
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./frontend/clean-board
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Check if package.json exists
+      run: |
+        if [ ! -f package.json ]; then
+          echo "package.json not found - frontend project not properly initialized"
+          echo "Skipping frontend CI steps"
+          exit 0
+        fi
+    
+    - name: Setup Bun
+      if: hashFiles('./frontend/clean-board/package.json') != ''
+      uses: oven-sh/setup-bun@v2
+      with:
+        bun-version: latest
+    
+    - name: Install dependencies
+      if: hashFiles('./frontend/clean-board/package.json') != ''
+      run: bun install
+    
+    - name: Run linter
+      if: hashFiles('./frontend/clean-board/package.json') != ''
+      run: bun run lint
+    
+    - name: Run formatter check
+      if: hashFiles('./frontend/clean-board/package.json') != ''
+      run: bun run format --dry-run
+    
+    - name: Build
+      if: hashFiles('./frontend/clean-board/package.json') != ''
+      run: bun run build
 
   backend:
     runs-on: ubuntu-latest
