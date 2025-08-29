@@ -1,0 +1,181 @@
+name: Docker Build & Security
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}/cleanboard-backend
+
+jobs:
+  docker-build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      security-events: write
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Log in to Container Registry
+      if: github.event_name != 'pull_request'
+      uses: docker/login-action@v3
+      with:
+        registry: ${{ env.REGISTRY }}
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Extract metadata
+      id: meta
+      uses: docker/metadata-action@v5
+      with:
+        images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+        tags: |
+          type=ref,event=branch
+          type=ref,event=pr
+          type=sha,prefix={{branch}}-
+          type=raw,value=latest,enable={{is_default_branch}}
+
+    - name: Build Docker image
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        file: ./Dockerfile.backend
+        push: false
+        load: true
+        tags: ${{ steps.meta.outputs.tags }}
+        labels: ${{ steps.meta.outputs.labels }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+
+    - name: Test Docker image
+      run: |
+        # Test that the image can start successfully
+        docker run --rm -d --name test-container -p 8001:8000 ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+        
+        # Wait for container to start
+        sleep 10
+        
+        # Check if container is still running
+        if ! docker ps | grep test-container; then
+          echo "Container failed to start properly"
+          docker logs test-container
+          exit 1
+        fi
+        
+        # Stop test container
+        docker stop test-container
+
+    - name: Run Trivy vulnerability scanner
+      uses: aquasecurity/trivy-action@master
+      with:
+        image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+        format: 'sarif'
+        output: 'trivy-results.sarif'
+
+    - name: Upload Trivy scan results to GitHub Security
+      uses: github/codeql-action/upload-sarif@v3
+      if: always()
+      with:
+        sarif_file: 'trivy-results.sarif'
+
+    - name: Run Trivy vulnerability scanner (table format)
+      uses: aquasecurity/trivy-action@master
+      with:
+        image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+        format: 'table'
+        exit-code: '1'
+        ignore-unfixed: true
+        vuln-type: 'os,library'
+        severity: 'CRITICAL,HIGH'
+
+    - name: Push Docker image
+      if: github.event_name != 'pull_request'
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        file: ./Dockerfile.backend
+        push: true
+        tags: ${{ steps.meta.outputs.tags }}
+        labels: ${{ steps.meta.outputs.labels }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+
+  docker-compose-test:
+    runs-on: ubuntu-latest
+    needs: docker-build
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Create data directory
+      run: mkdir -p data
+
+    - name: Test docker-compose stack startup
+      run: |
+        # Start the stack in detached mode
+        docker-compose up -d
+        
+        # Wait for services to start
+        sleep 30
+        
+        # Check if backend service is running
+        if ! docker-compose ps | grep backend | grep Up; then
+          echo "Backend service failed to start"
+          docker-compose logs backend
+          exit 1
+        fi
+        
+        # Test backend health endpoint
+        max_attempts=10
+        attempt=1
+        while [ $attempt -le $max_attempts ]; do
+          if curl -f http://localhost:8000/health 2>/dev/null; then
+            echo "Backend health check passed"
+            break
+          fi
+          
+          if [ $attempt -eq $max_attempts ]; then
+            echo "Backend health check failed after $max_attempts attempts"
+            docker-compose logs backend
+            exit 1
+          fi
+          
+          echo "Attempt $attempt failed, retrying in 5 seconds..."
+          sleep 5
+          attempt=$((attempt + 1))
+        done
+
+    - name: Check for security issues in docker-compose
+      run: |
+        # Check for exposed sensitive ports
+        if docker-compose config | grep -E "ports:.*:(22|3306|5432|6379|27017)"; then
+          echo "Warning: Sensitive ports detected in docker-compose configuration"
+        fi
+        
+        # Check for privileged containers
+        if docker-compose config | grep "privileged: true"; then
+          echo "Error: Privileged containers detected"
+          exit 1
+        fi
+        
+        # Check for host network mode
+        if docker-compose config | grep "network_mode:.*host"; then
+          echo "Error: Host network mode detected"
+          exit 1
+        fi
+
+    - name: Clean up
+      if: always()
+      run: |
+        docker-compose down -v
+        docker system prune -f
