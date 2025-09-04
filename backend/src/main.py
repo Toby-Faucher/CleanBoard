@@ -1,6 +1,7 @@
+from auth.endpoints import router as auth_router
+from config import settings
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from config import settings
 from health import router as health_router
 
 app = FastAPI(title=settings.app_name, debug=settings.debug)
@@ -14,6 +15,7 @@ app.add_middleware(
 )
 
 app.include_router(health_router, tags=["Health Checks"])
+app.include_router(auth_router)
 
 
 @app.get("/")

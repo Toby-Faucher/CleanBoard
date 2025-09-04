@@ -8,7 +8,8 @@ class Settings(BaseSettings):
     host: str = "0.0.0.0"
     port: int = 8000
 
-    # TODO: this is temp
+    # DuckDB Configuration
+    database_path: str = "data/cleanboard.db"
     database_url: Optional[str] = None
     secret_key: str = "your-secret-key-change-in-production"
 

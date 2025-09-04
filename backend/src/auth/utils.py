@@ -5,7 +5,7 @@ from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from jose import JWTError, jwt
 
-from ..config import settings
+from config import settings
 from .schemas import TokenData
 
 SECRET_KEY = settings.secret_key
