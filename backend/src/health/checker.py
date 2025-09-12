@@ -1,10 +1,12 @@
-from dataclasses import dataclass
-from typing import Callable, Awaitable, List, Optional, Dict
 import asyncio
 import inspect
-from datetime import datetime, timedelta, UTC
+from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
+from typing import Awaitable, Callable, Dict, List, Optional
 
-from .models import HealthCheckResponse, HealthStatus, CheckResult, SystemHealth
+from loguru import logger
+
+from .models import CheckResult, HealthCheckResponse, HealthStatus, SystemHealth
 
 
 @dataclass
@@ -52,6 +54,11 @@ class HealthChecker:
 
     def __init__(self):
         """Initialize a new HealthChecker instance."""
+        logger.bind(
+            component="health_checker",
+            operation="Initialization",
+        ).info("Health Checker Initialized", total_checks=0, cache_enabled=True)
+
         self.checks: List[HealthCheck] = []
         self._cache: Dict[str, CacheEntry] = {}
 
@@ -75,6 +82,17 @@ class HealthChecker:
         Raises:
             ValueError: If check_func is not a valid async callable with no parameters
         """
+
+        logger.bind(
+            component="health_checker",
+            operation="validation",
+            check_name=name,
+            critical=critical,
+            timeout=timeout,
+            cache_ttl=cache_ttl,
+            metric=True,
+        ).info(f"Health Check Reistered: {name}")
+
         self._validate_check_function(check_func, name)
         self.checks.append(HealthCheck(name, check_func, timeout, critical, cache_ttl))
 
@@ -89,13 +107,37 @@ class HealthChecker:
             ValueError: If function is not callable, not async, or accepts parameters
         """
         if not callable(check_func):
+            logger.bind(
+                component="health_checker",
+                operation="validation",
+                check_name=name,
+                error_type="not_callable",
+                validation_failed=True,
+            ).info(f"Health Check Failed: '{name}' Is Not Callable")
+
             raise ValueError(f"Check function '{name}' must be callable")
 
         if not inspect.iscoroutinefunction(check_func):
+            logger.bind(
+                component="health_checker",
+                operation="validation",
+                check_name=name,
+                error_type="not_async",
+                validation_failed=True,
+            ).info(f"Health Check Failed: '{name}' Is Not Async")
+
             raise ValueError(f"Check function '{name}' must be an async function")
 
         sig = inspect.signature(check_func)
         if len(sig.parameters) > 0:
+            logger.bind(
+                component="health_checker",
+                operation="validation",
+                check_name=name,
+                error_type="not_empty_params",
+                validation_failed=True,
+            ).info(f"Health Check Failed: '{name}' Must Not Have Any Parameters")
+
             raise ValueError(f"Check function '{name}' must not accept any parameters")
 
     def _get_cached_result(self, check_name: str) -> Optional[CheckResult]:
@@ -110,6 +152,13 @@ class HealthChecker:
         if check_name in self._cache:
             cache_entry = self._cache[check_name]
             if datetime.now(UTC) < cache_entry.expires_at:
+                logger.bind(
+                    component="cache",
+                    operation="cache_hit",
+                    check_name=check_name,
+                    cache_performance=True,
+                    metric=True,
+                ).info(f"Cache hit for check: '{check_name}'")
                 return cache_entry.result
             else:
                 del self._cache[check_name]
@@ -132,6 +181,15 @@ class HealthChecker:
         expired_keys = [
             key for key, entry in self._cache.items() if now >= entry.expires_at
         ]
+
+        logger.bind(
+            component="cache",
+            operation="cache_hit",
+            expired_keys=len(expired_keys),
+            cache_performance=True,
+            metric=True,
+        ).info(f"Cleaned Up {len(expired_keys)} expired cache entries")
+
         for key in expired_keys:
             del self._cache[key]
 
@@ -149,7 +207,27 @@ class HealthChecker:
         """
         self._cleanup_expired_cache()
 
+        logger.bind(
+            component="health_checker",
+            operation="execution_start",
+            total_checks=len(checks_to_run),
+            fail_fast=fail_fast,
+            # TODO: make generate_execution_id
+            execution_id=generate_execution_id(),
+            metric=True,
+        )
+
         async def execute_single_check(check: HealthCheck) -> tuple[str, CheckResult]:
+            start_logger = logger.bind(
+                component="health_checker",
+                operation="individual_check_start",
+                check_name=check.name,
+                check_critical=check.critical,
+                check_timeout=check.timeout,
+                execution_context=True,
+            )
+            start_logger.info(f"Starting health check: {check.name}")
+
             if check.cache_ttl is not None:
                 cached_result = self._get_cached_result(check.name)
                 if cached_result is not None:
@@ -157,16 +235,45 @@ class HealthChecker:
 
             try:
                 start_time = datetime.now(UTC)
+                logger.bind(
+                    component="health_checker",
+                    operation="check_execution",
+                    check_name=check.name,
+                    start_time=start_time.isoformat(),
+                    performance_tracking=True,
+                ).debug(f"Executing check function: {check.name}")
+
                 try:
                     result = await asyncio.wait_for(check.check_func(), check.timeout)
 
                     if not isinstance(result, bool):
+                        # TODO: impl
+                        logger.bind(
+                            component="health_checker",
+                            operation="check_bool",
+                            check_name=check.name,
+                            incorrect_type=type(result).__name__,
+                            critical=check.critical,
+                            error_type="not_bool",
+                        ).error(f"Check '{check.name}' Is Not A Bool")
                         raise ValueError(
                             f"Check function must return a boolean, got {type(result).__name__}"
                         )
 
                     is_healthy = result
                 except asyncio.TimeoutError:
+                    logger.bind(
+                        component="health_checker",
+                        operation="check_timeout",
+                        check_name=check.name,
+                        timeout_duration=check.timeout,
+                        critical=check.critical,
+                        error_type="timeout",
+                        performance_issue=True,
+                        alert_level="warning" if not check.critical else "critical",
+                    ).warning(
+                        f"Health check '{check.name}' timed out after {check.timeout}s"
+                    )
                     return check.name, CheckResult(
                         status=HealthStatus.TIMEDOUT,
                         error="Timed Out!",
@@ -174,6 +281,19 @@ class HealthChecker:
                         response_time=check.timeout,
                     )
                 except TypeError as e:
+                    logger.bind(
+                        component="health_checker",
+                        operation="check_exception",
+                        check_name=check.name,
+                        error_type=type(e).__name__,
+                        error_messages=str(e),
+                        critical=check.critical,
+                        alert_level="error" if check.critical else "warning",
+                        incidnet_tracking=True,
+                    ).opt(exception=True).error(
+                        f"Check '{check.name}' failed with the exception: {e}"
+                    )
+
                     return check.name, CheckResult(
                         status=HealthStatus.ERROR,
                         response_time=0.0,
@@ -185,6 +305,20 @@ class HealthChecker:
                 response_time = (end_time - start_time).total_seconds() * 1000
 
                 status = HealthStatus.HEALTHY if is_healthy else HealthStatus.UNHEALTHY
+
+                logger.bind(
+                    component="health_checker",
+                    operation="check_timeout",
+                    check_name=check.name,
+                    status=status.value,
+                    response_time=round(response_time, 2),
+                    performance_metric=True,
+                    metric=True,
+                    start_time=start_time.isoformat(),
+                    end_time=end_time.isoformat(),
+                ).info(
+                    f"Check: '{check.name}' completed: {status.value} | {response_time:.2f}ms"
+                )
 
                 result = CheckResult(
                     status=status,
@@ -198,12 +332,26 @@ class HealthChecker:
                 return check.name, result
 
             except Exception as e:
+                logger.error(f"Health Check '{check.name}' Failed: {str(e)}")
                 return check.name, CheckResult(
                     status=HealthStatus.ERROR,
                     response_time=0.0,
                     error=str(e),
                     critical=check.critical,
                 )
+            logger.bind(
+                component="health_checker",
+                operation="check_success",
+                check_name=check.name,
+                status=status.value,
+                response_time=response_time,
+                critical=check.critical,
+                performance_metric=True,
+                success_tracking=True,
+                metric=True,
+            ).success(
+                f"Health check '{check.name}' passed: {status.value} ({response_time:.2f}ms)"
+            )
 
         if fail_fast:
             # Early termination mode - stop on first critical failure
@@ -227,6 +375,19 @@ class HealthChecker:
                         break
 
                 if critical_failed:
+                    logger.bind(
+                        component="health_checker",
+                        operation="fail_fast_triggered",
+                        check_name=check_name,
+                        result_status=result.status.value,
+                        critical_failure=True,
+                        remaining_tasks=len([t for t in tasks.keys() if not t.done()]),
+                        alert_level="critical",
+                        incident_tracking=True,
+                    ).critical(
+                        f"Critical check '{check_name}' failed, triggering fail-fast mode"
+                    )
+
                     for task, check in tasks.items():
                         if task.cancelled():
                             results[check.name] = CheckResult(
@@ -249,6 +410,21 @@ class HealthChecker:
                 # Handle case where the entire operation is cancelled
                 for check in checks_to_run:
                     if check.name not in results:
+                        cancelled_checks = [
+                            check.name
+                            for task, check in tasks.items()
+                            if task.cancelled()
+                        ]
+                        logger.bind(
+                            component="health_checker",
+                            operation="checks_cancelled",
+                            cancelled_checks=cancelled_checks,
+                            cancellation_reason="critical_failure_fail_fast",
+                            impact_assessment=True,
+                        ).warning(
+                            f"Cancelled {len(cancelled_checks)} checks due to critical failure in fail-fast mode"
+                        )
+
                         results[check.name] = CheckResult(
                             status=HealthStatus.CANCELLED,
                             response_time=0.0,
@@ -270,6 +446,24 @@ class HealthChecker:
         system_status = (
             SystemHealth.UNHEALTHY if critical_failed else SystemHealth.HEALTHY
         )
+        critical_failures = [
+            name
+            for name, result in results.items()
+            if result.critical and result.status != HealthStatus.HEALTHY
+        ]
+
+        logger.bind(
+            component="health_checker",
+            operation="system_health_assessment",
+            system_status=system_status.value,
+            total_checks=len(results),
+            critical_failures=len(critical_failures),
+            failed_critical_checks=critical_failures,
+            # TODO: make func
+            health_score=calculate_health_score(results),
+            metric=True,
+            system_health_tracking=True,
+        ).info(f"System health assessment: {system_status.value}")
 
         return HealthCheckResponse(status=system_status, checks=results)
 
