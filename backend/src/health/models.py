@@ -8,7 +8,6 @@ from datetime import UTC, datetime
 from enum import Enum
 from typing import Annotated, Any, Dict, Literal, Optional
 
-from loguru import logger
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
