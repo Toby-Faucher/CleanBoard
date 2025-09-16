@@ -19,7 +19,7 @@ from logging_config import (
     generate_correlation_id,
     generate_execution_id,
 )
-from models import CheckResult, HealthCheckResponse, HealthStatus, SystemHealth
+from .models import CheckResult, HealthCheckResponse, HealthStatus, SystemHealth
 
 configure_health_logging(
     environment=os.getenv("ENVIRONMENT", "development"),
