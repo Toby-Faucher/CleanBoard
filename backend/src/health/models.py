@@ -4,10 +4,11 @@ This module defines Pydantic models for health check responses,
 including status enumerations and validation logic.
 """
 
-from pydantic import BaseModel, Field, ConfigDict, field_validator
-from typing import Dict, Any, Optional, Literal, Annotated
-from datetime import datetime, UTC
+from datetime import UTC, datetime
 from enum import Enum
+from typing import Annotated, Any, Dict, Literal, Optional
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 def _utc_now() -> datetime:
